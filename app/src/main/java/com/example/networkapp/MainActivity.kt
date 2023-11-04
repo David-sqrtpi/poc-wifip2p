@@ -24,11 +24,6 @@ class MainActivity : AppCompatActivity() {
 
     private var channel: WifiP2pManager.Channel? = null
 
-    private var localService: WifiP2pServiceInfo? = null
-    private var serviceRequest: WifiP2pServiceRequest = WifiP2pDnsSdServiceRequest.newInstance("NetworkApp", "_netapp._tcp")
-    private var localServiceAdded: Boolean = false
-    private var serviceRequestAdded: Boolean = false
-
     private val buddies = mutableMapOf<String, String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,56 +33,41 @@ class MainActivity : AppCompatActivity() {
         channel = manager?.initialize(this, mainLooper, null)
 
         findViewById<Button>(server_btn).setOnClickListener {
-            if(!localServiceAdded) {
-                startRegistration()
-                return@setOnClickListener
-            }
+            manager?.clearLocalServices(channel,
+                object : WifiP2pManager.ActionListener {
+                    val TAG = "$tagPrefix method -removeLocalService"
+                    override fun onSuccess() {
+                        Log.d(TAG, "removeLocalService success")
+                    }
 
-            removeLocalService(object : WifiP2pManager.ActionListener {
-                val TAG = "$tagPrefix method -removeLocalService"
-                override fun onSuccess() {
-                    // Success!
-                    Log.d(TAG, "removeLocalService success")
-                    startRegistration()
-                }
+                    override fun onFailure(code: Int) {
+                        Log.e(TAG, "removeLocalService failure -$code")
+                    }
+                })
 
-                override fun onFailure(code: Int) {
-                    // Command failed.  Check for P2P_UNSUPPORTED, ERROR, or BUSY
-                    Log.e(TAG, "removeLocalService failure -$code")
-                }
-            })
+            startRegistration()
         }
 
         findViewById<Button>(client_btn).setOnClickListener {
-            if(!serviceRequestAdded) {
-                discoverService()
-                return@setOnClickListener
-            }
+            manager?.clearServiceRequests(channel,
+                object : WifiP2pManager.ActionListener {
+                    val TAG = "$tagPrefix method -removeServiceRequest"
+                    override fun onSuccess() {
+                        Log.d(TAG, "removeServiceRequest success")
+                    }
 
-            removeServiceRequest(object : WifiP2pManager.ActionListener {
-                val TAG = "$tagPrefix method -removeServiceRequest"
-                override fun onSuccess() {
-                    // Success!
-                    Log.d(TAG, "removeServiceRequest success")
-                    discoverService()
-                }
+                    override fun onFailure(code: Int) {
+                        Log.e(TAG, "removeServiceRequest failure -$code")
+                    }
+                })
 
-                override fun onFailure(code: Int) {
-                    // Command failed.  Check for P2P_UNSUPPORTED, ERROR, or BUSY
-                    Log.e(TAG, "removeServiceRequest failure -$code")
-                }
-            })
+            discoverService()
         }
 
         setListeners()
     }
 
     private fun setListeners() {
-        /* Callback includes:
-         * fullDomain: full domain name: e.g "printer._ipp._tcp.local."
-         * record: TXT record dta as a map of key/value pairs.
-         * device: The device running the advertised service.
-         */
         val txtListener = WifiP2pManager.DnsSdTxtRecordListener { fullDomain, record, device ->
             val TAG = "$tagPrefix listener -txtListener"
             Log.d(TAG, "DnsSdTxtRecord available -$record")
@@ -103,8 +83,6 @@ class MainActivity : AppCompatActivity() {
 
         val servListener =
             WifiP2pManager.DnsSdServiceResponseListener { instanceName, registrationType, resourceType ->
-                // Update the device name with the human-friendly version from
-                // the DnsTxtRecord, assuming one arrived.
                 val TAG = "$tagPrefix listener -servListener"
                 Log.d(TAG, "onBonjourServiceAvailable")
                 Log.d(TAG, "instanceName -$instanceName")
@@ -113,15 +91,6 @@ class MainActivity : AppCompatActivity() {
 
                 resourceType.deviceName =
                     buddies[resourceType.deviceAddress] ?: resourceType.deviceName
-
-                // Add to the custom adapter defined specifically for showing
-                // wifi devices.
-                /*val fragment = fragmentManager
-                    .findFragmentById(R.id.frag_peerlist) as WiFiDirectServicesList
-                (fragment.listAdapter as WiFiDevicesAdapter).apply {
-                    add(resourceType)
-                    notifyDataSetChanged()
-                }*/
             }
 
         manager?.setDnsSdResponseListeners(channel, servListener, txtListener)
@@ -129,40 +98,32 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun startRegistration() {
-        //  Create a string map containing information about your service.
         val record: Map<String, String> = mapOf(
             "listenport" to 8000.toString(),
             "buddyname" to "John Doe${(Math.random() * 1000).toInt()}",
             "available" to "visible"
         )
 
-        // Service information.  Pass it an instance name, service type
-        // _protocol._transportlayer , and the map containing
-        // information other devices will want once they connect to this one.
-        localService =
+        var localService =
             WifiP2pDnsSdServiceInfo.newInstance("NetworkApp", "_netapp._tcp", record)
-
-        // Add the local service, sending the service info, network channel,
-        // and listener that will be used to indicate success or failure of
-        // the request.
 
         manager?.addLocalService(channel, localService, object : WifiP2pManager.ActionListener {
             val log = findViewById<TextView>(server_logger)
 
             override fun onSuccess() {
                 log.text = "Success"
-                localServiceAdded = true
             }
 
             override fun onFailure(arg0: Int) {
                 log.text = "Fail: $arg0"
-                localServiceAdded = false
             }
         })
     }
 
     @SuppressLint("MissingPermission")
     private fun discoverService() {
+        val serviceRequest = WifiP2pDnsSdServiceRequest.newInstance()
+
         manager?.addServiceRequest(
             channel,
             serviceRequest,
@@ -170,51 +131,25 @@ class MainActivity : AppCompatActivity() {
                 val TAG = "$tagPrefix method -addServiceRequest"
                 override fun onSuccess() {
                     Log.d(TAG, "addServiceRequest success")
-
-                    serviceRequestAdded = true
-
-                    manager?.discoverPeers(channel,
-                        object: WifiP2pManager.ActionListener {
-                            override fun onSuccess() {
-                                Log.d(TAG, "discoverPeers success")
-
-                                manager?.discoverServices(
-                                    channel,
-                                    object : WifiP2pManager.ActionListener {
-                                        val TAG = "$tagPrefix method -discoverServices()"
-
-                                        override fun onSuccess() {
-                                            // Success!
-                                            Log.d(TAG, "Success")
-                                        }
-
-                                        override fun onFailure(code: Int) {
-                                            Log.e(TAG, "discoverPeers failure -$code")
-                                        }
-                                    }
-                                )
-                            }
-
-                            override fun onFailure(p0: Int) {
-                                Log.e(TAG, "discoverPeers failure -$p0")
-                            }
-                        })
                 }
 
                 override fun onFailure(code: Int) {
                     Log.e(TAG, "addServiceRequest failure -$code")
-
-                    serviceRequestAdded = false
                 }
-            }
-        )
-    }
+            })
 
-    private fun removeLocalService(actionListener: WifiP2pManager.ActionListener) {
-        manager?.removeLocalService(channel, localService, actionListener)
-    }
+        manager?.discoverServices(
+            channel,
+            object : WifiP2pManager.ActionListener {
+                val TAG = "$tagPrefix method -discoverServices()"
 
-    private fun removeServiceRequest(actionListener: WifiP2pManager.ActionListener) {
-        manager?.removeServiceRequest(channel, serviceRequest, actionListener)
+                override fun onSuccess() {
+                    Log.d(TAG, "Success")
+                }
+
+                override fun onFailure(code: Int) {
+                    Log.e(TAG, "discoverPeers failure -$code")
+                }
+            })
     }
 }
